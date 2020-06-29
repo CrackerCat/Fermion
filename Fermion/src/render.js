@@ -2,6 +2,7 @@
 //////////////////////////////////////////////////
 const electron = require('electron');
 const remote = electron.remote;
+const nativeImage = electron.nativeImage;
 const BrowserWindow = remote.BrowserWindow;
 const frida = require('frida');
 const path = require('path');
@@ -23,6 +24,7 @@ let session = null;
 let logMutex = new MutexPromise('48011b2b9a930ee19e26320e5adbffa2e309663c');
 let RunningLog = [];
 var deviceId = 'local';
+var currentFilePath = null;
 
 // Attach
 async function inject(AttachTo) {
@@ -41,10 +43,14 @@ async function inject(AttachTo) {
 	// to an array using a mutex and every X ms we flush the array
 	// to the text area
 	script.message.connect(message => {
-		ChangeLogExclusive(logMutex, 'Append', message.payload);
+		if (message.type == "send") {
+			ChangeLogExclusive(logMutex, 'Append', message.payload);
+		} else {
+			ChangeLogExclusive(logMutex, 'Append', "[!] Runtime error: " + message.stack);
+		}
 		setTimeout(function () {
 			if (RunningLog.length > 0) {
-				ChangeLogExclusive(logMutex, 'Write', message.payload);
+				ChangeLogExclusive(logMutex, 'Write', null);
 			}
 		}, 500);
 	});
@@ -73,10 +79,14 @@ async function start(Path, Args) {
 	// to an array using a mutex and every X ms we flush the array
 	// to the text area
 	script.message.connect(message => {
-		ChangeLogExclusive(logMutex, 'Append', message.payload);
+		if (message.type == "send") {
+			ChangeLogExclusive(logMutex, 'Append', message.payload);
+		} else {
+			ChangeLogExclusive(logMutex, 'Append', "[!] Runtime error: " + message.stack);
+		}
 		setTimeout(function () {
 			if (RunningLog.length > 0) {
-				ChangeLogExclusive(logMutex, 'Write', message.payload);
+				ChangeLogExclusive(logMutex, 'Write', null);
 			}
 		}, 500);
 	});
@@ -205,10 +215,14 @@ document.getElementById("FridaReload").onclick = async function () {
 			script.unload();
 			script = await session.createScript(MonacoCodeEditor.getValue());
 			script.message.connect(message => {
-				ChangeLogExclusive(logMutex, 'Append', message.payload);
+				if (message.type == "send") {
+					ChangeLogExclusive(logMutex, 'Append', message.payload);
+				} else {
+					ChangeLogExclusive(logMutex, 'Append', "[!] Runtime error: " + message.stack);
+				}
 				setTimeout(function () {
 					if (RunningLog.length > 0) {
-						ChangeLogExclusive(logMutex, 'Write', message.payload);
+						ChangeLogExclusive(logMutex, 'Write', null);
 					}
 				}, 500);
 			});
@@ -232,7 +246,7 @@ document.getElementById("FridaProc").onclick = function () {
 		backgroundColor: '#464646',
 		webPreferences: { nodeIntegration: true }
 	})
-	ProcWin.loadURL(modalPath+"?deviceId="+deviceId);
+	ProcWin.loadURL(modalPath+"?deviceId="+btoa(deviceId));
 	ProcWin.once('ready-to-show', () => {
 		ProcWin.show();
 		ProcWin.focus();
@@ -267,7 +281,7 @@ async function updateDeviceList() {
 
 	// Add new entries to the dropdown
 	devArr.forEach(function(elem) {
-		if (!dnArr.includes(elem) && elem != "tcp") {
+		if (!dnArr.includes(elem) && elem != "tcp" && elem != "socket") {
 			$("#deviceName").append(new Option(elem))
 		}
 	})
@@ -294,8 +308,13 @@ document.getElementById("FermionOpen").onclick = function () {
 				if (err) {
 					appendFridaLog("[!] Error opening file: " + err.message);
 					return;
+				} else {
+					appendFridaLog("[+] File opened..");
+					appendFridaLog("    |-> Path: " + result.filePaths[0]);
 				}
 				MonacoCodeEditor.setValue(data);
+				// Set global filepath on success
+				currentFilePath = result.filePaths[0];
 			});
 		}
 	}).catch(err =>{
@@ -315,7 +334,12 @@ document.getElementById("FermionSave").onclick = function () {
 				if (err) {
 					appendFridaLog("[!] Error saving file: " + err.message)
 					return;
+				} else {
+					appendFridaLog("[+] File saved..");
+					appendFridaLog("    |-> Path: " + result.filePath);
 				}
+				// Set global filepath on success
+				currentFilePath = result.filePath;
 			});
 		}
 	}).catch(err =>{
@@ -373,12 +397,39 @@ function setMonacoTheme() {
 	} else if (theme == "Solarized-Dark") {
 		monaco.editor.defineTheme("SolarizedDark", SolarizedDark);
 		monaco.editor.setTheme("SolarizedDark");
+	} else if (theme == "Solarized-Light") {
+		monaco.editor.defineTheme("SolarizedLight", SolarizedLight);
+		monaco.editor.setTheme("SolarizedLight");
+	} else if (theme == "Birds-Of-Paradise") {
+		monaco.editor.defineTheme("BirdsOfParadise", BirdsOfParadise);
+		monaco.editor.setTheme("BirdsOfParadise");
+	} else if (theme == "Clouds") {
+		monaco.editor.defineTheme("Clouds", Clouds);
+		monaco.editor.setTheme("Clouds");
+	} else if (theme == "Kuroir") {
+		monaco.editor.defineTheme("Kuroir", Kuroir);
+		monaco.editor.setTheme("Kuroir");
+	} else if (theme == "NightOwl") {
+		monaco.editor.defineTheme("NightOwl", NightOwl);
+		monaco.editor.setTheme("NightOwl");
+	} else if (theme == "Textmate") {
+		monaco.editor.defineTheme("Textmate", Textmate);
+		monaco.editor.setTheme("Textmate");
 	} else if (theme == "VSCode") {
 		monaco.editor.setTheme("vs");
 	} else if (theme == "VSCode-Dark") {
 		monaco.editor.setTheme("vs-dark");
 	} else if (theme == "VSCode-HighContrast") {
 		monaco.editor.setTheme("hc-black");
+	}
+}
+
+document.getElementById("FermionMonacoWrap").onclick = function () {
+	var wrapState = document.getElementById("FermionMonacoWrap");
+	if (wrapState.checked == true) {
+		MonacoCodeEditor.updateOptions({ wordWrap: "on" });
+	} else {
+		MonacoCodeEditor.updateOptions({ wordWrap: "off" });
 	}
 }
 
@@ -447,8 +498,38 @@ var LocalLoadLang = function (url, method) {
 document.addEventListener("keydown", function (e) {
 	if ((window.navigator.platform.match("Mac") ? e.metaKey : e.ctrlKey) && e.keyCode == 83) {
 		e.preventDefault();
-		// Trigger the save function
-		document.getElementById("FermionSave").click();
+
+		// Do we currently have a known file path?
+		if (currentFilePath == null) {
+			// Trigger the save function
+			document.getElementById("FermionSave").click();
+		} else {
+			// Overwrite known file
+			dialog.showMessageBox(
+				{
+					type: "warning",
+					buttons: ["Yes", "No"],
+					defaultId: 1,
+					title: "Save File",
+					message: "Overwrite existing file?",
+					detail: currentFilePath,
+					cancelId: 1,
+				}
+			).then(result => {
+				if (result.response == 0) {
+					content = MonacoCodeEditor.getValue();
+					fs.writeFile(currentFilePath, content, (err) => {
+						if (err) {
+							appendFridaLog("[!] Error saving file: " + err.message);
+							appendFridaLog("    |-> Path: " + currentFilePath);
+						} else {
+							appendFridaLog("[+] File saved..");
+							appendFridaLog("    |-> Path: " + currentFilePath);
+						}
+					})
+				}
+			})
+		}
 	}
 }, false);
 
